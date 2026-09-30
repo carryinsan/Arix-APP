@@ -7,10 +7,8 @@ export const config = { runtime: 'edge' };
  *   UPSTASH_REDIS_REST_URL
  *   UPSTASH_REDIS_REST_TOKEN
  *   ARIX_APP_SECRET                  (32+ random chars)
+ *   ARIX_APP_URL                     (recommended canonical https://... origin)
  *
- * OAuth (optional until enabled in the UI):
- *   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
- *   GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
  *
  * Deployment (required only for real Vercel deployments):
  *   VERCEL_TOKEN
@@ -35,8 +33,8 @@ const REDIS_TOKEN = ENV.UPSTASH_REDIS_REST_TOKEN || '';
 const VERCEL_TOKEN = ENV.VERCEL_TOKEN || '';
 const VERCEL_TEAM_ID = ENV.VERCEL_TEAM_ID || '';
 const BASE_DOMAIN = (ENV.ARIX_BASE_DOMAIN || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+const APP_URL = (ENV.ARIX_APP_URL || '').trim().replace(/\/$/, '');
 const SESSION_TTL = 60 * 60 * 24 * 7;
-const OAUTH_TTL = 60 * 10;
 const LOCK_TTL = 20;
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_FILE = 5 * 1024 * 1024;
@@ -81,6 +79,10 @@ async function requireAppSecret() {
 }
 function httpErr(status, code, message, extra={}) { const e = new Error(message); e.status=status; e.code=code; e.extra=extra; return e; }
 function reqOrigin(req) { try { return new URL(req.url).origin; } catch { return ''; } }
+function appOrigin(req) {
+  const configured = APP_URL && /^https:\/\//i.test(APP_URL) ? APP_URL : '';
+  return configured || reqOrigin(req);
+}
 function isBrowserRequest(req) { return Boolean(req.headers.get('cookie') || req.headers.get('origin')); }
 function setHeaderSafe(h, k, v) { if (v != null) h.set(k, v); }
 function response(data, status=200, opts={}) {
@@ -215,7 +217,7 @@ function projectSlug(name) {
 }
 function validateEnvKey(key) {
   if(!/^[A-Z_][A-Z0-9_]{0,127}$/.test(key)) throw httpErr(400,'INVALID_ENV_KEY','Environment variable names must match [A-Z_][A-Z0-9_]*.');
-  const blocked=['ARIX_APP_SECRET','UPSTASH_REDIS_REST_TOKEN','UPSTASH_REDIS_REST_URL','VERCEL_TOKEN','GOOGLE_CLIENT_SECRET','GITHUB_CLIENT_SECRET'];
+  const blocked=['ARIX_APP_SECRET','UPSTASH_REDIS_REST_TOKEN','UPSTASH_REDIS_REST_URL','VERCEL_TOKEN'];
   if(blocked.includes(key)) throw httpErr(400,'PROTECTED_ENV_KEY','This environment variable is reserved by the platform.');
 }
 function safeProjectName(name) { return projectSlug(name).slice(0,40); }
@@ -318,6 +320,20 @@ async function saveFileInternal(projectId,path,base64,size,reason='save') {
   } finally { await lock(); }
 }
 
+async function createGuestIdentity() {
+  const userId=randomId('guest');
+  const user={id:userId,email:`${userId}@guest.arix.invalid`,name:'Guest',avatar:'',createdAt:now(),updatedAt:now(),provider:'guest'};
+  await redisTx([['SET',`u:${userId}`,JSON.stringify(user)],['SADD',`up:${userId}:projects`,'__none__']]);
+  return user;
+}
+async function ensureGuestSession(req) {
+  const existing=await getSession(req);
+  if(existing) return {session:existing,setCookie:null};
+  const user=await createGuestIdentity();
+  const session=await createSession(user.id);
+  return {session,setCookie:sessionCookie(session.id)};
+}
+
 async function getSession(req) {
   const id=parseCookie(req,COOKIE); if(!id) return null;
   const s=await getJson(`sess:${id}`); if(!s) return null;
@@ -336,55 +352,6 @@ async function createSession(userId) {
   await setJson(`sess:${id}`,s,SESSION_TTL); return s;
 }
 
-function oauthProviderConfig(provider, req, mode='login') {
-  const origin=reqOrigin(req);
-  if(provider==='google'){
-    if(!ENV.GOOGLE_CLIENT_ID || !ENV.GOOGLE_CLIENT_SECRET) throw httpErr(503,'GOOGLE_NOT_CONFIGURED','Google sign-in is not configured yet.');
-    const redirect=`${origin}/api/backend?action=oauth-callback&provider=google&mode=${encodeURIComponent(mode)}`;
-    const params=new URLSearchParams({client_id:ENV.GOOGLE_CLIENT_ID,redirect_uri:redirect,response_type:'code',scope:'openid email profile',state:'STATE'});
-    return {auth:'https://accounts.google.com/o/oauth2/v2/auth',token:'https://oauth2.googleapis.com/token',redirect,params};
-  }
-  if(provider==='github'){
-    if(!ENV.GITHUB_CLIENT_ID || !ENV.GITHUB_CLIENT_SECRET) throw httpErr(503,'GITHUB_NOT_CONFIGURED','GitHub sign-in is not configured yet.');
-    const scope=mode==='connect' || mode==='import' ? 'read:user user:email repo' : 'read:user user:email';
-    const redirect=`${origin}/api/backend?action=oauth-callback&provider=github&mode=${encodeURIComponent(mode)}`;
-    const params=new URLSearchParams({client_id:ENV.GITHUB_CLIENT_ID,redirect_uri:redirect,response_type:'code',scope,state:'STATE'});
-    return {auth:'https://github.com/login/oauth/authorize',token:'https://github.com/login/oauth/access_token',redirect,params};
-  }
-  throw httpErr(400,'INVALID_PROVIDER','Unsupported authentication provider.');
-}
-
-async function oauthStart(req, provider, mode='login') {
-  await requireAppSecret(); await rateLimit(`oauth:${provider}:${req.headers.get('x-forwarded-for')||'ip'}`,20,60);
-  const c=oauthProviderConfig(provider,req,mode); const state=randomId('state');
-  await setJson(`oauth:${state}`,{state,provider,mode,createdAt:now(),redirect:c.redirect},OAUTH_TTL);
-  c.params.set('state',state); return Response.redirect(`${c.auth}?${c.params.toString()}`,302);
-}
-
-async function oauthCallback(req,url) {
-  await requireAppSecret(); const provider=url.searchParams.get('provider'); const mode=url.searchParams.get('mode')||'login'; const code=url.searchParams.get('code'); const state=url.searchParams.get('state');
-  if(!code || !state) throw httpErr(400,'OAUTH_INVALID','OAuth response is missing code/state.');
-  const st=await getJson(`oauth:${state}`); await redisCmd('DEL',[`oauth:${state}`]);
-  if(!st || st.provider!==provider) throw httpErr(403,'OAUTH_STATE_INVALID','OAuth state is invalid or expired.');
-  const c=oauthProviderConfig(provider,req,mode); if(st.redirect!==c.redirect) throw httpErr(403,'OAUTH_REDIRECT_MISMATCH','OAuth redirect mismatch.');
-  let access='';
-  if(provider==='google'){
-    const form=new URLSearchParams({code,client_id:ENV.GOOGLE_CLIENT_ID,client_secret:ENV.GOOGLE_CLIENT_SECRET,redirect_uri:c.redirect,grant_type:'authorization_code'});
-    const r=await fetch(c.token,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded','accept':'application/json'},body:form}); const d=await r.json(); if(!r.ok || !d.access_token) throw httpErr(502,'GOOGLE_TOKEN_FAILED','Google sign-in could not be completed.'); access=d.access_token;
-    const ur=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:`Bearer ${access}`,Accept:'application/json'}}); const u=await ur.json();
-    if(!ur.ok || !u.sub || !u.email) throw httpErr(502,'GOOGLE_IDENTITY_FAILED','Google did not provide a usable verified identity.');
-    return await finishOAuth(req,provider,mode,String(u.sub),String(u.email).toLowerCase(),String(u.name||u.email.split('@')[0]),u.picture||'');
-  }
-  const form=new URLSearchParams({code,client_id:ENV.GITHUB_CLIENT_ID,client_secret:ENV.GITHUB_CLIENT_SECRET,redirect_uri:c.redirect});
-  const r=await fetch(c.token,{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded','accept':'application/json'},body:form}); const d=await r.json(); if(!r.ok || !d.access_token) throw httpErr(502,'GITHUB_TOKEN_FAILED','GitHub sign-in could not be completed.'); access=d.access_token;
-  const ur=await fetch('https://api.github.com/user',{headers:{Authorization:`Bearer ${access}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':USER_AGENT}}); const u=await ur.json();
-  if(!ur.ok || !u.id) throw httpErr(502,'GITHUB_IDENTITY_FAILED','GitHub did not provide a usable identity.');
-  let email=(u.email||'').toLowerCase();
-  if(!email){ const er=await fetch('https://api.github.com/user/emails',{headers:{Authorization:`Bearer ${access}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':USER_AGENT}}); const emails=await er.json(); if(er.ok && Array.isArray(emails)){ const p=emails.find(x=>x.primary&&x.verified)||emails.find(x=>x.verified); email=(p?.email||'').toLowerCase(); } }
-  if(!email) email=`github-${u.id}@users.invalid`;
-  return await finishOAuth(req,provider,mode,String(u.id),email,String(u.name||u.login||email.split('@')[0]),String(u.avatar_url||''),access);
-}
-
 async function encrypt(value) {
   await requireAppSecret();
   const base=new TextEncoder().encode(APP_SECRET); const dk=new Uint8Array(await crypto.subtle.digest('SHA-256',base));
@@ -398,25 +365,6 @@ async function decrypt(blob) {
   try{ const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64u(a)},key,fromB64u(b)); return new TextDecoder().decode(pt); } catch { throw httpErr(502,'DECRYPT_FAILED','Stored secret could not be decrypted.'); }
 }
 
-async function finishOAuth(req,provider,mode,subject,email,name,avatar,accessToken='') {
-  await rateLimit(`login:${req.headers.get('x-forwarded-for')||'ip'}`,20,60);
-  const identityKey=`id:${provider}:${subject}`; let userId=await redisCmd('GET',[identityKey]); let user;
-  if(userId) user=await getJson(`u:${userId}`);
-  if(!user && email){ userId=await redisCmd('GET',[`ue:${email}`]); if(userId) user=await getJson(`u:${userId}`); }
-  if(!user){ userId=randomId('usr'); user={id:userId,email,name,avatar,createdAt:now(),updatedAt:now(),provider}; }
-  user={...user,email,name,avatar,updatedAt:now()};
-  if(accessToken) user.githubToken=await encrypt(accessToken);
-  await redisTx([
-    ['SET',`u:${userId}`,JSON.stringify(user)],
-    ['SET',identityKey,userId],
-    ['SET',`ue:${email}`,userId],
-    ['SADD',`up:${userId}:projects`,'__none__']
-  ]);
-  if(mode==='connect' || mode==='import'){
-    const ret=`${reqOrigin(req)}/?github=connected&user=${encodeURIComponent(userId)}`; return Response.redirect(ret,302);
-  }
-  const session=await createSession(userId); return new Response(null,{status:302,headers:{'location':`${reqOrigin(req)}/?signed_in=1`,'set-cookie':sessionCookie(session.id)}});
-}
 
 async function requireProject(req, session, pid, needed='viewer') {
   const p=await getJson(`p:${pid}`); if(!p) throw httpErr(404,'PROJECT_NOT_FOUND','Project not found.');
@@ -535,7 +483,7 @@ async function publishAI(req, session, body) {
   if(await redisCmd('EXISTS',[`aislug:${slug}`])) throw httpErr(409,'AI_SLUG_TAKEN','That AI slug is already in use.');
   const cfg={id,userId:session.userId,name,slug,systemPrompt:String(body.systemPrompt||'').slice(0,12000),model:String(body.model||ENV.ARIX_AI_MODEL||'').slice(0,120),publishedAt:now(),updatedAt:now(),status:'published'};
   await redisTx([['SET',`ai:${id}`,JSON.stringify(cfg)],['SET',`aislug:${slug}`,id],['SADD',`ais:${session.userId}`,id]]);
-  const endpoint=`${reqOrigin(req)}${endpointPathForAI(id)}`;
+  const endpoint=`${appOrigin(req)}${endpointPathForAI(id)}`;
   return {...cfg,invokeEndpoint:endpoint,configurationReady:Boolean(ENV.ARIX_AI_BASE_URL && ENV.ARIX_AI_API_KEY && (ENV.ARIX_AI_MODEL||cfg.model))};
 }
 function endpointPathForAI(id){ return `/api/backend?action=public-ai&ai=${encodeURIComponent(id)}`; }
@@ -553,35 +501,24 @@ async function invokePublishedAI(req, body) {
   return {id:ai.id,name:ai.name,model:d.model||ai.model||ENV.ARIX_AI_MODEL,output:d.choices?.[0]?.message?.content??'',raw:d.choices?.[0]||null,usage:d.usage||null};
 }
 
-async function githubRepos(session){ const u=await getJson(`u:${session.userId}`); if(!u?.githubToken) throw httpErr(403,'GITHUB_CONNECT_REQUIRED','Connect GitHub with repository access first.'); const token=await decrypt(u.githubToken); const r=await fetch('https://api.github.com/user/repos?per_page=100&sort=updated',{headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':USER_AGENT}}); const d=await r.json(); if(!r.ok) throw httpErr(502,'GITHUB_API_ERROR','GitHub repository listing failed.'); return d.map(x=>({owner:x.owner?.login,name:x.name,fullName:x.full_name,private:x.private,defaultBranch:x.default_branch,htmlUrl:x.html_url})); }
-async function githubImport(session,pid,body){ const p=await requireProject({headers:()=>{}},session,pid,'developer').catch(async e=>{if(e?.code==='FORBIDDEN')throw e;return getJson(`p:${pid}`)}); const u=await getJson(`u:${session.userId}`); if(!u?.githubToken) throw httpErr(403,'GITHUB_CONNECT_REQUIRED','Connect GitHub with repository access first.'); const token=await decrypt(u.githubToken); const owner=String(body.owner||'').trim(); const repo=String(body.repo||'').trim(); const ref=String(body.ref||'').trim(); if(!/^[A-Za-z0-9_.-]+$/.test(owner)||!/^[A-Za-z0-9_.-]+$/.test(repo)||ref.length>120) throw httpErr(400,'INVALID_REPOSITORY','Invalid repository selection.');
-  const base=`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`; const tr=await fetch(`${base}/git/trees/${encodeURIComponent(ref||'HEAD')}?recursive=1`,{headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':USER_AGENT}}); const tree=await tr.json(); if(!tr.ok||!tree.tree) throw httpErr(502,'GITHUB_TREE_FAILED','GitHub repository tree could not be read.'); const candidates=tree.tree.filter(x=>x.type==='blob').slice(0,MAX_FILES);
-  let total=0; const lock=await acquireLock(`lock:github:${pid}`); try{
-    for(const item of candidates){ let path; try{path=normalizePath(item.path)}catch{continue;} const ext=(path.split('.').pop()||'').toLowerCase(); if(['exe','dll','so','dmg','iso','7z'].includes(ext)) continue; const br=await fetch(`${base}/contents/${item.path}?ref=${encodeURIComponent(ref||'HEAD')}`,{headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':USER_AGENT}}); const bd=await br.json().catch(()=>null); if(!br.ok||bd?.encoding!=='base64'||typeof bd.content!=='string') continue; const clean=bd.content.replace(/\s+/g,''); const bytes=fromB64(clean); if(bytes.length>MAX_FILE || total+bytes.length>MAX_PROJECT) break; total+=bytes.length; await saveFileWithoutSnapshot(pid,path,clean,bytes.length); }
-  } finally { await lock(); }
-  p.github={owner,repo,ref:ref||'HEAD',connectedAt:now()}; p.updatedAt=now(); await setJson(`p:${pid}`,p); await createSnapshot(pid,'github-import',session.userId); return p;
-}
-async function saveFileWithoutSnapshot(pid,path,b64,size){ const old=await fileMeta(pid,path); const next=(await totalProjectBytes(pid))-(old?.size||0)+size; if(next>MAX_PROJECT) throw httpErr(413,'PROJECT_STORAGE_QUOTA','Project storage quota exceeded.'); const hash=await sha256(b64); const chunks=Math.ceil(b64.length/CHUNK_CHARS); const cmds=[]; for(let i=0;i<chunks;i++)cmds.push(['SET',`fc:${pid}:${hash}:${i}`,b64.slice(i*CHUNK_CHARS,(i+1)*CHUNK_CHARS)]); const meta={path,size,mime:fileMime(path),chunks,sha256:hash,updatedAt:now()}; cmds.push(['SET',await fileKey(pid,path),JSON.stringify(meta)],['SADD',`pf:${pid}`,path],['SET',`pb:${pid}`,next]); await redisPipeline(cmds); if(old&&old.sha256!==hash){const keys=[];for(let i=0;i<old.chunks;i++)keys.push(`fc:${pid}:${old.sha256}:${i}`);if(keys.length)await redisCmd('DEL',keys);} return meta; }
-
-async function makeGitHubWebhook(req,session,pid){ const p=await requireProject({headers:()=>{}},session,pid,'admin').catch(async e=>{if(e?.code==='FORBIDDEN')throw e;return getJson(`p:${pid}`)}); const u=await getJson(`u:${session.userId}`); if(!u?.githubToken||!p.github?.owner) throw httpErr(400,'GITHUB_REPOSITORY_NOT_CONNECTED','Connect/import a GitHub repository first.'); const token=await decrypt(u.githubToken); const secret=b64u(crypto.getRandomValues(new Uint8Array(32))); const url=`${reqOrigin(req)}/api/backend?action=github-webhook&project=${encodeURIComponent(pid)}`;
-  const r=await fetch(`https://api.github.com/repos/${encodeURIComponent(p.github.owner)}/${encodeURIComponent(p.github.repo)}/hooks`,{method:'POST',headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28','User-Agent':USER_AGENT},body:JSON.stringify({name:'web',active:true,events:['push'],config:{url,content_type:'json',secret,insecure_ssl:'0'}})}); const d=await r.json().catch(()=>null); if(!r.ok) throw httpErr(502,'GITHUB_WEBHOOK_FAILED',d?.message||'GitHub webhook could not be created.'); const enc=await encrypt(secret); p.github={...p.github,webhookId:d.id,webhookConfiguredAt:now()}; await redisTx([['SET',`gwh:${pid}`,enc],['SET',`p:${pid}`,JSON.stringify(p)]]); return {configured:true,hookId:d.id}; }
-async function githubWebhook(req,url){ const pid=url.searchParams.get('project'); const sig=req.headers.get('x-hub-signature-256')||''; const enc=await redisCmd('GET',[`gwh:${pid}`]); if(!enc) throw httpErr(404,'WEBHOOK_NOT_CONFIGURED','Webhook not configured.'); const secret=await decrypt(enc); const raw=await req.text(); const expected='sha256='+b64hex(await hmacSha256(new TextEncoder().encode(secret),raw)); if(!timingSafeEqual(new TextEncoder().encode(expected),new TextEncoder().encode(sig))) throw httpErr(401,'WEBHOOK_SIGNATURE_INVALID','Webhook signature is invalid.'); const event=req.headers.get('x-github-event')||''; if(event!=='push') return response({ok:true,ignored:event}); const p=await getJson(`p:${pid}`); if(!p?.ownerId) throw httpErr(404,'PROJECT_NOT_FOUND','Project not found.'); const u=await getJson(`u:${p.ownerId}`); if(!u?.githubToken) throw httpErr(409,'GITHUB_TOKEN_MISSING','GitHub connection is missing.'); const fakeSession={userId:p.ownerId}; await githubImport(fakeSession,pid,{owner:p.github.owner,repo:p.github.repo,ref:p.github.ref||'HEAD'}); const deployed=await deployProject(fakeSession,pid,{target:'production'}); return response({ok:true,deployment:deployed}); }
 function b64hex(bytes){ let s=''; for(const b of bytes)s+=b.toString(16).padStart(2,'0'); return s; }
 
 async function api(req) {
   const url=new URL(req.url); const action=url.searchParams.get('action')||'health'; const method=req.method.toUpperCase();
   if(method==='OPTIONS') return response({ok:true},200,{cors:true});
-  if(action==='health') return response({ok:true,service:'Arix-App',time:new Date().toISOString(),storage:'upstash-redis',deployment:Boolean(VERCEL_TOKEN),oauth:{google:Boolean(ENV.GOOGLE_CLIENT_ID&&ENV.GOOGLE_CLIENT_SECRET),github:Boolean(ENV.GITHUB_CLIENT_ID&&ENV.GITHUB_CLIENT_SECRET)},ai:Boolean(ENV.ARIX_AI_BASE_URL&&ENV.ARIX_AI_API_KEY)});
-  if(action==='oauth-start') return await oauthStart(req,url.searchParams.get('provider'),url.searchParams.get('mode')||'login');
-  if(action==='oauth-callback') return await oauthCallback(req,url);
-  if(action==='github-webhook') return await githubWebhook(req,url);
+  if(action==='health') return response({ok:true,service:'Arix-App',time:new Date().toISOString(),storage:'upstash-redis',deployment:Boolean(VERCEL_TOKEN),authentication:'guest-session',sessionTtlDays:7,ai:Boolean(ENV.ARIX_AI_BASE_URL&&ENV.ARIX_AI_API_KEY)});
   if(action==='public-ai') { if(method!=='POST') throw httpErr(405,'METHOD_NOT_ALLOWED','POST required.'); return response(await invokePublishedAI(req,await readBody(req)),200,{cors:true}); }
+  if(action==='bootstrap' && method==='GET'){
+    assertSameOrigin(req);
+    const {session,setCookie}=await ensureGuestSession(req);
+    const user=await getJson(`u:${session.userId}`);
+    return response({ok:true,user,csrf:session.csrf,sessionExpiresAt:session.expiresAt,authentication:'guest'},200,setCookie?{cookie:setCookie}:{});
+  }
 
   const session=await requireSession(req); assertSameOrigin(req);
-  if(action==='logout' && method==='POST'){ await redisCmd('DEL',[`sess:${session.id}`]); return response({ok:true},200,{cookie:clearCookie()}); }
-  if(action==='me' && method==='GET'){ const user=await getJson(`u:${session.userId}`); if(!user) throw httpErr(401,'AUTH_REQUIRED','Account not found.'); return response({user:{...user,githubToken:undefined},csrf:session.csrf,sessionExpiresAt:session.expiresAt}); }
+  if(action==='me' && method==='GET'){ const user=await getJson(`u:${session.userId}`); if(!user) throw httpErr(401,'AUTH_REQUIRED','Account not found.'); return response({user:{...user},csrf:session.csrf,sessionExpiresAt:session.expiresAt}); }
   const body=(method==='POST'||method==='PUT'||method==='PATCH'||method==='DELETE')?await readBody(req):{};
-  if(['me','projects-create','project-update','file-save','file-create','file-delete','file-rename','file-duplicate','env-upsert','env-delete','deploy','rollback','api-key-create','api-key-revoke','ai-publish','github-import','github-webhook-create'].includes(action)) await requireCsrf(req,session);
+  if(['me','projects-create','project-update','file-save','file-create','file-delete','file-rename','file-duplicate','env-upsert','env-delete','deploy','rollback','api-key-create','api-key-revoke','ai-publish'].includes(action)) await requireCsrf(req,session);
 
   if(action==='projects' && method==='GET'){ const ids=(await redisCmd('SMEMBERS',[`up:${session.userId}:projects`])||[]).filter(x=>x!=='__none__'); const vals=await Promise.all(ids.map(id=>getJson(`p:${id}`))); return response(vals.filter(Boolean).sort((a,b)=>b.updatedAt-a.updatedAt)); }
   if(action==='projects-create' && method==='POST'){ return response(await createProject(session,body),201); }
@@ -609,9 +546,6 @@ async function api(req) {
   if(action==='api-key-revoke' && method==='POST'){ const id=String(body.id||''); const k=await getJson(`keyid:${id}`); if(!k||k.userId!==session.userId)throw httpErr(404,'API_KEY_NOT_FOUND','API key not found.'); k.status='revoked'; await setJson(`keyid:${id}`,k); await setJson(`key:${k.hash}`,k); return response({ok:true}); }
   if(action==='ai-publish' && method==='POST'){ return response(await publishAI(req,session,body),201); }
   if(action==='ai-list' && method==='GET'){ const ids=await redisCmd('SMEMBERS',[`ais:${session.userId}`])||[]; const vals=await Promise.all(ids.map(id=>getJson(`ai:${id}`))); return response(vals.filter(Boolean)); }
-  if(action==='github-repos' && method==='GET'){ return response(await githubRepos(session)); }
-  if(action==='github-import' && method==='POST'){ return response(await githubImport(session,body.projectId,body)); }
-  if(action==='github-webhook-create' && method==='POST'){ return response(await makeGitHubWebhook(req,session,body.projectId)); }
   if(action==='usage' && method==='GET'){ const pid=url.searchParams.get('id'); await requireProject(req,session,pid,'viewer'); return response({projectId:pid,files:(await listFiles(pid)).length,bytes:await totalProjectBytes(pid),snapshots:safeInt(await redisCmd('LLEN',[`ps:${pid}`]),0),deployments:safeInt(await redisCmd('LLEN',[`pdeps:${pid}`]),0)}); }
   throw httpErr(404,'NOT_FOUND','Unknown action.');
 }
