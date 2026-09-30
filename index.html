@@ -208,6 +208,19 @@
                 const data = await res.json();
                 if (data.success) {
                     nameInput.value = '';
+                    
+                    // Auto-initialize with an index.html so deployments render as web apps immediately
+                    await fetch('/api/backend', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            action: 'saveFile', 
+                            projectId: data.projectId, 
+                            path: 'index.html', 
+                            content: '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>App</title>\n</head>\n<body>\n  <h1>Paste your code here</h1>\n</body>\n</html>' 
+                        })
+                    });
+                    
                     loadProjects();
                     selectProject(data.projectId);
                 } else {
