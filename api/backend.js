@@ -36,130 +36,14 @@ export default async function (req, res) {
         const url = new URL(req.url, `https://${req.headers.host}`);
         const action = url.searchParams.get('action') || (req.body && req.body.action);
 
-        // Session and API Key handling
-        let user = null;
-        
-        // Check API Key first
-        const authHeader = req.headers.authorization || '';
-        if (authHeader.startsWith('Bearer arix_')) {
-            const token = authHeader.split(' ')[1];
-            const userId = await redisCommand('GET', `apikey_lookup:${token}`);
-            if (userId) {
-                user = { id: userId, isApiKey: true };
-            }
-        }
-
-        // If no API key, check session
-        const cookies = req.headers.cookie || '';
-        const sessionIdMatch = cookies.match(/sessionId=([^;]+)/);
-        let sessionId = sessionIdMatch ? sessionIdMatch[1] : null;
-
-        if (!user && sessionId) {
-            const userData = await redisCommand('GET', `session:${sessionId}`);
-            if (userData) {
-                user = JSON.parse(userData);
-                // Extend session
-                await redisCommand('EXPIRE', `session:${sessionId}`, 7 * 24 * 60 * 60);
-            }
-        }
-
-        const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
-        const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
-        const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-        const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-        
-        const host = req.headers.host;
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        const callbackUrl = `${protocol}://${host}/api/backend?action=oauth_callback`;
+        // Default local user (OAuth removed)
+        let user = { id: 'default_user', name: 'Developer', email: 'dev@local' };
 
         switch (action) {
-            case 'auth':
-                const provider = url.searchParams.get('provider');
-                if (provider === 'github') {
-                    if (!GITHUB_CLIENT_ID) return res.status(500).json({ error: "GITHUB_CLIENT_ID not configured" });
-                    return res.redirect(302, `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(callbackUrl + '&provider=github')}`);
-                } else if (provider === 'google') {
-                    if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: "GOOGLE_CLIENT_ID not configured" });
-                    return res.redirect(302, `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(callbackUrl + '&provider=google')}&response_type=code&scope=email%20profile`);
-                }
-                return res.status(400).json({ error: "Invalid provider" });
-                
-            case 'oauth_callback':
-                const code = url.searchParams.get('code');
-                const authProvider = url.searchParams.get('provider');
-                if (!code) return res.status(400).json({ error: "Missing authorization code" });
-
-                let authenticatedUser = null;
-
-                if (authProvider === 'github') {
-                    const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
-                        method: 'POST',
-                        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            client_id: GITHUB_CLIENT_ID,
-                            client_secret: GITHUB_CLIENT_SECRET,
-                            code,
-                            redirect_uri: callbackUrl + '&provider=github'
-                        })
-                    });
-                    const tokenData = await tokenRes.json();
-                    if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
-                    
-                    const userRes = await fetch('https://api.github.com/user', {
-                        headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
-                    });
-                    const userData = await userRes.json();
-                    
-                    authenticatedUser = {
-                        id: `github_${userData.id}`,
-                        email: userData.email,
-                        name: userData.name || userData.login,
-                        avatar: userData.avatar_url
-                    };
-                } else if (authProvider === 'google') {
-                    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: new URLSearchParams({
-                            client_id: GOOGLE_CLIENT_ID,
-                            client_secret: GOOGLE_CLIENT_SECRET,
-                            code,
-                            grant_type: 'authorization_code',
-                            redirect_uri: callbackUrl + '&provider=google'
-                        })
-                    });
-                    const tokenData = await tokenRes.json();
-                    if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
-                    
-                    const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-                        headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
-                    });
-                    const userData = await userRes.json();
-                    
-                    authenticatedUser = {
-                        id: `google_${userData.id}`,
-                        email: userData.email,
-                        name: userData.name,
-                        avatar: userData.picture
-                    };
-                } else {
-                    return res.status(400).json({ error: "Invalid provider" });
-                }
-
-                const newSessionId = 'sess_' + crypto.randomUUID();
-                await redisCommand('SET', `session:${newSessionId}`, JSON.stringify(authenticatedUser), 'EX', 7 * 24 * 60 * 60);
-                
-                res.setHeader('Set-Cookie', `sessionId=${newSessionId}; Path=/; HttpOnly; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`);
-                return res.redirect(302, '/');
-
             case 'session':
                 return res.status(200).json({ user });
 
             case 'logout':
-                if (sessionId) {
-                    await redisCommand('DEL', `session:${sessionId}`);
-                    res.setHeader('Set-Cookie', `sessionId=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax`);
-                }
                 return res.status(200).json({ success: true });
 
             case 'listProjects':
