@@ -236,34 +236,38 @@ export default async function (req, res) {
 
                 // Otherwise, serve static files
                 if (route === '/') route = 'index.html';
-                // Strip leading slash if present in runFiles keys
                 let searchPath = route.startsWith('/') ? route.substring(1) : route;
                 
-                // Fallback sequence: Exact -> Public folder -> Any HTML file -> First available file
+                // Smart fallback: Find exact match, or auto-detect the first HTML file available
                 let staticFile = runFiles[searchPath] || runFiles['public/' + searchPath];
                 
                 if (!staticFile && route === 'index.html') {
-                    const fallbackKey = Object.keys(runFiles).find(k => k.endsWith('.html')) || Object.keys(runFiles)[0];
-                    if (fallbackKey) staticFile = runFiles[fallbackKey];
+                    const autoHtml = Object.keys(runFiles).find(k => k.toLowerCase().endsWith('.html'));
+                    if (autoHtml) staticFile = runFiles[autoHtml];
                 }
                 
                 if (staticFile) {
-                    // Default to HTML so pasted code renders as a webpage instead of raw text
-                    let contentType = 'text/html; charset=utf-8'; 
+                    let contentType = 'text/plain; charset=utf-8';
                     
-                    if (searchPath.endsWith('.css')) contentType = 'text/css; charset=utf-8';
-                    else if (searchPath.endsWith('.js')) contentType = 'application/javascript; charset=utf-8';
-                    else if (searchPath.endsWith('.json')) contentType = 'application/json; charset=utf-8';
+                    // Force HTML rendering if it's an .html file OR if the pasted code contains HTML tags
+                    if (searchPath.endsWith('.html') || staticFile.content.trim().startsWith('<')) {
+                        contentType = 'text/html; charset=utf-8';
+                    } else if (searchPath.endsWith('.css')) {
+                        contentType = 'text/css; charset=utf-8';
+                    } else if (searchPath.endsWith('.js')) {
+                        contentType = 'application/javascript; charset=utf-8';
+                    } else if (searchPath.endsWith('.json')) {
+                        contentType = 'application/json; charset=utf-8';
+                    }
                     
                     res.setHeader('Content-Type', contentType);
                     
-                    // Use .end() to bypass framework serialization that might convert strings to plain text
-                    res.status(200);
-                    return res.end(staticFile.content);
+                    // Convert to raw Buffer to prevent Vercel/Next.js from auto-converting HTML strings into raw text
+                    return res.status(200).end(Buffer.from(staticFile.content));
                 }
 
                 res.setHeader('Content-Type', 'text/html; charset=utf-8');
-                return res.status(404).end('<h2>404 - File Not Found</h2><p>Please create an <b>index.html</b> file in your project.</p>');
+                return res.status(404).end('<h2>404 - App Not Found</h2><p>Please create an <b>index.html</b> file with valid HTML code.</p>');
 
             case 'health':
                 return res.status(200).json({ status: 'ok' });
