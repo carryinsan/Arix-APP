@@ -20,14 +20,9 @@
             <span class="px-2 py-1 bg-blue-600/20 text-blue-400 rounded text-xs border border-blue-600/30">Beta</span>
         </div>
         <div id="user-controls" class="flex items-center space-x-4">
-            <!-- Will be populated with login buttons or user info -->
-            <button id="login-github-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded shadow transition flex items-center space-x-2">
-                <i class="fab fa-github"></i>
-                <span>Login with GitHub</span>
-            </button>
-            <button id="login-google-btn" class="bg-white hover:bg-gray-100 text-gray-900 px-4 py-2 rounded shadow transition flex items-center space-x-2">
-                <i class="fab fa-google text-blue-500"></i>
-                <span>Login with Google</span>
+            <button id="open-dashboard-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center space-x-2">
+                <i class="fas fa-layer-group"></i>
+                <span>Projects</span>
             </button>
         </div>
     </header>
@@ -150,54 +145,28 @@
             });
         });
 
-        // OAuth Login Handlers
-        document.getElementById('login-github-btn').addEventListener('click', () => {
-            window.location.href = '/api/backend?action=auth&provider=github';
+        // Dashboard Modal Controls
+        document.getElementById('open-dashboard-btn').addEventListener('click', () => {
+            document.getElementById('dashboard-modal').classList.remove('hidden');
+            loadProjects();
         });
 
-        document.getElementById('login-google-btn').addEventListener('click', () => {
-            window.location.href = '/api/backend?action=auth&provider=google';
+        document.getElementById('close-dashboard-btn').addEventListener('click', () => {
+            document.getElementById('dashboard-modal').classList.add('hidden');
         });
 
-        // Check session and load dashboard
+        // Initialize application directly without authentication
         async function checkSession() {
             try {
                 const res = await fetch('/api/backend?action=session');
                 const data = await res.json();
-                if (data.user) {
-                    currentUser = data.user;
-                    document.getElementById('user-controls').innerHTML = `
-                        <div class="flex items-center space-x-3">
-                            <button id="open-dashboard-btn" class="bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-sm mr-2 flex items-center space-x-2"><i class="fas fa-layer-group"></i><span>Projects</span></button>
-                            <img src="${data.user.avatar || 'https://via.placeholder.com/32'}" class="w-8 h-8 rounded-full border border-gray-600">
-                            <span class="text-sm text-gray-300">${data.user.name || data.user.email}</span>
-                            <button id="logout-btn" class="text-xs text-gray-500 hover:text-white ml-2">Logout</button>
-                        </div>
-                    `;
-                    
-                    document.getElementById('logout-btn').addEventListener('click', async () => {
-                        await fetch('/api/backend?action=logout');
-                        window.location.reload();
-                    });
-                    
-                    document.getElementById('open-dashboard-btn').addEventListener('click', () => {
-                        document.getElementById('dashboard-modal').classList.remove('hidden');
-                        loadProjects();
-                    });
-                    
-                    document.getElementById('close-dashboard-btn').addEventListener('click', () => {
-                        document.getElementById('dashboard-modal').classList.add('hidden');
-                    });
-                    
-                    // Show dashboard on load if no project selected
-                    document.getElementById('dashboard-modal').classList.remove('hidden');
-                    loadProjects();
-                    loadApiKey();
-                } else {
-                     document.getElementById('editor-container').innerHTML = `<div class="absolute inset-0 flex items-center justify-center text-gray-500 text-lg">Please login to start coding</div>`;
-                }
+                currentUser = data.user;
+                
+                document.getElementById('dashboard-modal').classList.remove('hidden');
+                loadProjects();
+                loadApiKey();
             } catch (e) {
-                console.error("Session check failed", e);
+                console.error("Session initialization failed", e);
             }
         }
 
