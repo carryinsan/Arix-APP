@@ -1,137 +1,133 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arix-APP Dashboard</title>
+    <title>Arix-APP - GitHub + Vercel</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-        .full-height { height: calc(100vh - 64px); }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0e0e10; color: #fff;}
+        .hidden { display: none !important; }
+        .sidebar { background: #18181b; border-right: 1px solid #333; }
+        .file-item:hover { background: #27272a; cursor: pointer; }
+        .file-item.active { background: #3f3f46; }
+        #editor-container { width: 100%; height: calc(100vh - 60px); }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 flex flex-col h-screen overflow-hidden">
+<body class="flex flex-col h-screen">
 
     <!-- Header -->
-    <header class="bg-gray-800 border-b border-gray-700 h-16 flex items-center justify-between px-6">
-        <div class="flex items-center space-x-4">
-            <h1 class="text-xl font-bold text-white tracking-wide">Arix-APP</h1>
-            <span class="px-2 py-1 bg-blue-600/20 text-blue-400 rounded text-xs border border-blue-600/30">Beta</span>
+    <header class="flex items-center justify-between p-4 bg-[#18181b] border-b border-gray-800 h-[60px]">
+        <div class="font-bold text-xl tracking-tight text-white flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Arix-APP
         </div>
-        <div id="user-controls" class="flex items-center space-x-4">
-            <button id="open-dashboard-btn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm flex items-center space-x-2">
-                <i class="fas fa-layer-group"></i>
-                <span>Projects</span>
-            </button>
+        <div id="auth-controls" class="flex gap-4 items-center">
+            <span id="user-info" class="text-gray-400 text-sm hidden"></span>
+            <button id="btn-login" class="bg-white text-black px-4 py-1.5 rounded font-medium hover:bg-gray-200">Login</button>
+            <button id="btn-logout" class="bg-red-600 text-white px-4 py-1.5 rounded font-medium hover:bg-red-700 hidden">Logout</button>
         </div>
     </header>
 
-    <!-- Main Content -->
-    <main class="flex-1 flex overflow-hidden">
+    <!-- Login Screen -->
+    <div id="screen-login" class="flex-1 flex items-center justify-center hidden">
+        <div class="bg-[#18181b] p-8 rounded-lg border border-gray-800 w-96 flex flex-col gap-4 text-center">
+            <h2 class="text-2xl font-bold mb-4">Welcome to Arix</h2>
+            <a href="/api/platform/oauth/github" class="w-full bg-[#24292e] text-white py-2 rounded hover:bg-[#333] transition flex justify-center items-center gap-2">
+                Sign in with GitHub
+            </a>
+            <div class="text-gray-500 text-sm my-2">OR</div>
+            <form id="dev-login-form" class="flex flex-col gap-3">
+                <input type="email" id="dev-email" placeholder="Email Address" class="w-full bg-[#0e0e10] border border-gray-700 p-2 rounded text-white" required>
+                <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition">Continue with Email</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard Screen -->
+    <div id="screen-dashboard" class="flex-1 p-8 hidden max-w-5xl mx-auto w-full">
+        <div class="flex justify-between items-center mb-8">
+            <h2 class="text-3xl font-bold">Your Projects</h2>
+            <button id="btn-new-project" class="bg-white text-black px-4 py-2 rounded font-medium hover:bg-gray-200">New Project</button>
+        </div>
         
-        <!-- Sidebar (File Tree) -->
-        <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col">
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Explorer</h2>
-                <div class="flex space-x-2">
-                    <button id="new-file-btn" class="text-gray-400 hover:text-white" title="New File"><i class="fas fa-file-medical"></i></button>
-                    <button id="new-folder-btn" class="text-gray-400 hover:text-white" title="New Folder"><i class="fas fa-folder-plus"></i></button>
-                </div>
-            </div>
-            <div id="file-tree" class="flex-1 overflow-y-auto p-2 space-y-1">
-                <!-- File tree will be rendered here -->
-                <div class="text-gray-500 text-sm p-2">Loading...</div>
-            </div>
-        </aside>
+        <div id="projects-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
+            <!-- Projects injected here -->
+        </div>
 
-        <!-- Editor Area -->
-        <section class="flex-1 flex flex-col min-w-0 bg-gray-900">
-            <!-- Tabs -->
-            <div id="editor-tabs" class="flex bg-gray-800 border-b border-gray-700 overflow-x-auto h-10">
-                <!-- Tabs will be rendered here -->
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold">API Keys (For AI Deployments)</h2>
+            <button id="btn-new-apikey" class="bg-blue-600 text-white px-4 py-2 rounded font-medium hover:bg-blue-700">Generate Key</button>
+        </div>
+        <div id="apikeys-list" class="bg-[#18181b] border border-gray-800 rounded-lg p-4 flex flex-col gap-2">
+            <!-- Keys injected here -->
+        </div>
+    </div>
+
+    <!-- IDE Screen -->
+    <div id="screen-ide" class="flex-1 flex hidden overflow-hidden">
+        
+        <!-- Sidebar -->
+        <div class="sidebar w-64 flex flex-col">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+                <div class="font-semibold text-sm truncate" id="ide-project-name">Project</div>
+                <a href="#" id="ide-project-link" target="_blank" class="text-blue-500 hover:text-blue-400">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                </a>
             </div>
             
-            <!-- Editor Container -->
-            <div id="editor-container" class="flex-1 relative">
-                <!-- Monaco editor will be injected here -->
-                <div class="absolute inset-0 flex items-center justify-center text-gray-500">
-                    Select a file to edit
-                </div>
-            </div>
-        </section>
-
-        <!-- Right Panel (Settings & Deployment) -->
-        <aside class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-y-auto">
-            <div class="p-4 border-b border-gray-700">
-                <h2 class="text-lg font-semibold text-white mb-4">Deployment</h2>
-                <button id="deploy-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded shadow transition flex justify-center items-center space-x-2">
-                    <i class="fas fa-rocket"></i>
-                    <span>Deploy Project</span>
-                </button>
-                <div id="deploy-status" class="mt-4 text-sm hidden">
-                    <p class="text-gray-400">Status: <span id="deploy-status-text" class="text-yellow-400">Deploying...</span></p>
-                    <a id="deploy-link" href="#" target="_blank" class="text-blue-400 hover:underline mt-2 block break-all hidden"></a>
-                </div>
-            </div>
-
-            <div class="p-4 border-b border-gray-700">
-                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Environment Variables</h2>
-                <div id="env-vars-container" class="space-y-2 mb-3">
-                    <!-- Env vars list -->
-                </div>
-                <button id="add-env-btn" class="text-sm text-blue-400 hover:text-blue-300 flex items-center space-x-1">
-                    <i class="fas fa-plus"></i>
-                    <span>Add Variable</span>
-                </button>
+            <div class="p-2 border-b border-gray-800 flex gap-2">
+                <button id="btn-new-file" class="flex-1 text-xs bg-gray-800 hover:bg-gray-700 p-1.5 rounded border border-gray-700">New File</button>
+                <button id="btn-env-vars" class="flex-1 text-xs bg-gray-800 hover:bg-gray-700 p-1.5 rounded border border-gray-700">Env Vars</button>
             </div>
             
-            <div class="p-4">
-                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">API Key</h2>
-                <div class="bg-gray-900 p-2 rounded flex items-center justify-between border border-gray-700">
-                    <code id="api-key-display" class="text-xs text-gray-300 truncate mr-2">************************</code>
-                    <button id="copy-api-key-btn" class="text-gray-400 hover:text-white" title="Copy API Key"><i class="fas fa-copy"></i></button>
+            <div id="file-tree" class="flex-1 overflow-y-auto p-2 text-sm text-gray-300 flex flex-col gap-1">
+                <!-- Files injected here -->
+            </div>
+            
+            <div class="p-4 border-t border-gray-800">
+                <button id="btn-deploy" class="w-full bg-white text-black py-2 rounded font-semibold hover:bg-gray-200">Save & Deploy</button>
+                <button id="btn-back-dashboard" class="w-full mt-2 text-gray-400 text-sm hover:text-white py-1">Back to Dashboard</button>
+            </div>
+        </div>
+        
+        <!-- Editor -->
+        <div class="flex-1 flex flex-col relative">
+            <div id="editor-container"></div>
+            
+            <!-- Env Vars Modal (Overlay) -->
+            <div id="env-modal" class="absolute inset-0 bg-[#0e0e10]/95 z-10 hidden flex flex-col p-8">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold">Environment Variables</h3>
+                    <button id="btn-close-env" class="text-gray-400 hover:text-white">&times; Close</button>
                 </div>
-                <button id="generate-api-key-btn" class="mt-2 text-xs text-blue-400 hover:text-blue-300">Generate New Key</button>
-            </div>
-        </aside>
-
-    </main>
-
-    <!-- Modals -->
-    <!-- Project Dashboard Modal -->
-    <div id="dashboard-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden">
-        <div class="bg-gray-800 p-6 rounded-lg w-full max-w-2xl border border-gray-700 shadow-2xl">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-white">Your Projects</h2>
-                <button id="close-dashboard-btn" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
-            </div>
-            
-            <div class="mb-6 flex space-x-2">
-                <input type="text" id="new-project-name" placeholder="Project name (e.g. my-awesome-api)" class="flex-1 bg-gray-900 border border-gray-700 rounded px-4 py-2 text-white focus:outline-none focus:border-blue-500">
-                <button id="create-project-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">Create New</button>
-            </div>
-            
-            <div id="project-list" class="space-y-2 max-h-96 overflow-y-auto">
-                <!-- Projects injected here -->
-                <div class="text-gray-500 text-center py-4">Loading projects...</div>
+                <div class="flex gap-2 mb-6">
+                    <input type="text" id="env-key" placeholder="Key (e.g. API_KEY)" class="flex-1 bg-[#18181b] border border-gray-700 p-2 rounded text-white">
+                    <input type="password" id="env-val" placeholder="Value" class="flex-1 bg-[#18181b] border border-gray-700 p-2 rounded text-white">
+                    <button id="btn-add-env" class="bg-blue-600 px-4 py-2 rounded">Add</button>
+                </div>
+                <div id="env-list" class="flex-1 overflow-y-auto border border-gray-800 rounded bg-[#18181b] p-4"></div>
             </div>
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs/loader.min.js"></script>
+    <!-- Scripts -->
     <script>
-        let editor;
-        let currentFile = null;
-        let files = {};
-        let projectId = null;
         let currentUser = null;
+        let projects = [];
+        let apiKeys = [];
+        let currentProject = null;
+        let files = {};
+        let currentFilePath = null;
+        let editor = null;
 
-        // Monaco Editor Setup
-        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.38.0/min/vs' }});
+        // Init Monaco
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' }});
         require(['vs/editor/editor.main'], function() {
             editor = monaco.editor.create(document.getElementById('editor-container'), {
-                value: '// Welcome to Arix-APP\n// Select or create a file to start coding',
+                value: '// Select a file',
                 language: 'javascript',
                 theme: 'vs-dark',
                 automaticLayout: true,
@@ -139,244 +135,290 @@
             });
             
             editor.onDidChangeModelContent(() => {
-                if (currentFile && files[currentFile]) {
-                    files[currentFile].content = editor.getValue();
+                if(currentFilePath && files[currentFilePath] !== undefined) {
+                    files[currentFilePath] = editor.getValue();
                 }
             });
-        });
-
-        // Dashboard Modal Controls
-        document.getElementById('open-dashboard-btn').addEventListener('click', () => {
-            document.getElementById('dashboard-modal').classList.remove('hidden');
-            loadProjects();
-        });
-
-        document.getElementById('close-dashboard-btn').addEventListener('click', () => {
-            document.getElementById('dashboard-modal').classList.add('hidden');
-        });
-
-        // Initialize application directly without authentication
-        async function checkSession() {
-            try {
-                const res = await fetch('/api/backend?action=session');
-                const data = await res.json();
-                currentUser = data.user;
-                
-                document.getElementById('dashboard-modal').classList.remove('hidden');
-                loadProjects();
-                loadApiKey();
-            } catch (e) {
-                console.error("Session initialization failed", e);
-            }
-        }
-
-        // Project Management Dashboard
-        async function loadProjects() {
-            try {
-                const res = await fetch('/api/backend?action=listProjects');
-                const data = await res.json();
-                const list = document.getElementById('project-list');
-                list.innerHTML = '';
-                
-                if (data.projects && data.projects.length > 0) {
-                    data.projects.forEach(pid => {
-                        const div = document.createElement('div');
-                        div.className = 'bg-gray-900 p-4 rounded flex justify-between items-center border border-gray-700 hover:border-blue-500 cursor-pointer transition';
-                        div.innerHTML = `<span class="font-medium text-white">${pid.split('_').slice(1).join('_')}</span><span class="text-xs text-gray-500">${pid}</span>`;
-                        div.onclick = () => selectProject(pid);
-                        list.appendChild(div);
-                    });
-                } else {
-                    list.innerHTML = '<div class="text-gray-500 text-center py-4">No projects yet. Create one above!</div>';
-                }
-            } catch (e) {
-                console.error("Failed to load projects", e);
-            }
-        }
-
-        document.getElementById('create-project-btn').addEventListener('click', async () => {
-            const nameInput = document.getElementById('new-project-name');
-            const name = nameInput.value.trim();
-            if (!name) return alert("Please enter a project name");
             
-            try {
-                const res = await fetch('/api/backend', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'createProject', projectName: name })
-                });
-                const data = await res.json();
-                if (data.success) {
-                    nameInput.value = '';
-                    
-                    // Auto-initialize with an index.html so deployments render as web apps immediately
-                    await fetch('/api/backend', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            action: 'saveFile', 
-                            projectId: data.projectId, 
-                            path: 'index.html', 
-                            content: '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <title>App</title>\n</head>\n<body>\n  <h1>Paste your code here</h1>\n</body>\n</html>' 
-                        })
-                    });
-                    
-                    loadProjects();
-                    selectProject(data.projectId);
-                } else {
-                    alert("Error: " + data.error);
-                }
-            } catch (e) { alert("Failed to create project"); }
+            // Check auth after monaco loads
+            checkAuth();
         });
 
-        function selectProject(pid) {
-            projectId = pid;
-            document.getElementById('dashboard-modal').classList.add('hidden');
-            files = {};
-            currentFile = null;
-            if(editor) editor.setValue('// Loading ' + pid + '...');
-            loadFiles();
+        // DOM Elements
+        const screens = {
+            login: document.getElementById('screen-login'),
+            dashboard: document.getElementById('screen-dashboard'),
+            ide: document.getElementById('screen-ide')
+        };
+        const elUserInfo = document.getElementById('user-info');
+        const elBtnLogin = document.getElementById('btn-login');
+        const elBtnLogout = document.getElementById('btn-logout');
+
+        function showScreen(name) {
+            Object.values(screens).forEach(s => s.classList.add('hidden'));
+            screens[name].classList.remove('hidden');
         }
 
-        // File Tree Management
-        async function loadFiles() {
-            if (!projectId) return;
+        async function apiCall(path, method = 'GET', body = null) {
+            const opts = { method, headers: {} };
+            if (body) {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            }
+            const res = await fetch('/api/platform' + path, opts);
+            if(res.status === 401) {
+                currentUser = null;
+                updateAuthUI();
+                showScreen('login');
+                throw new Error("Unauthorized");
+            }
+            return res.json();
+        }
+
+        async function checkAuth() {
             try {
-                const res = await fetch(`/api/backend?action=getFiles&projectId=${projectId}`);
-                if (res.ok) {
-                    files = await res.json();
-                    renderFileTree();
-                } else {
-                    document.getElementById('file-tree').innerHTML = '<div class="text-gray-500 text-sm p-2">Failed to load files or no project found.</div>';
+                const data = await apiCall('/me');
+                if (data && data.userId) {
+                    currentUser = data;
+                    updateAuthUI();
+                    loadDashboard();
                 }
             } catch (e) {
-                console.error("Failed to load files", e);
+                showScreen('login');
             }
         }
+
+        function updateAuthUI() {
+            if (currentUser) {
+                elUserInfo.textContent = currentUser.name || currentUser.email;
+                elUserInfo.classList.remove('hidden');
+                elBtnLogin.classList.add('hidden');
+                elBtnLogout.classList.remove('hidden');
+                showScreen('dashboard');
+            } else {
+                elUserInfo.classList.add('hidden');
+                elBtnLogin.classList.remove('hidden');
+                elBtnLogout.classList.add('hidden');
+                showScreen('login');
+            }
+        }
+
+        // Login Handlers
+        elBtnLogin.onclick = () => showScreen('login');
+        elBtnLogout.onclick = async () => {
+            await apiCall('/logout', 'POST');
+            currentUser = null;
+            updateAuthUI();
+        };
+
+        document.getElementById('dev-login-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('dev-email').value;
+            await apiCall('/devlogin', 'POST', { email });
+            checkAuth();
+        };
+
+        // Dashboard
+        async function loadDashboard() {
+            projects = await apiCall('/projects');
+            apiKeys = await apiCall('/apikeys');
+            renderProjects();
+            renderApiKeys();
+        }
+
+        function renderProjects() {
+            const list = document.getElementById('projects-list');
+            list.innerHTML = projects.map(p => `
+                <div class="bg-[#18181b] border border-gray-800 rounded-lg p-5 flex flex-col justify-between hover:border-gray-600 transition">
+                    <div>
+                        <h3 class="font-bold text-lg mb-1">${p.name}</h3>
+                        <a href="https://${p.slug}.arix-app.vercel.com" target="_blank" class="text-sm text-blue-400 hover:underline">
+                            ${p.slug}.arix-app.vercel.com
+                        </a>
+                    </div>
+                    <button class="mt-4 bg-gray-800 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-700 w-full" onclick="openProject('${p.id}')">
+                        Open Editor
+                    </button>
+                </div>
+            `).join('');
+            if(projects.length === 0) list.innerHTML = '<p class="text-gray-500">No projects yet. Create one!</p>';
+        }
+
+        function renderApiKeys() {
+            const list = document.getElementById('apikeys-list');
+            list.innerHTML = apiKeys.map(k => `
+                <div class="flex justify-between items-center p-2 bg-[#0e0e10] rounded border border-gray-800">
+                    <code class="text-sm text-green-400">${k}</code>
+                    <button onclick="deleteApiKey('${k}')" class="text-red-500 text-sm hover:underline">Revoke</button>
+                </div>
+            `).join('');
+            if(apiKeys.length === 0) list.innerHTML = '<span class="text-gray-500">No API keys.</span>';
+        }
+
+        document.getElementById('btn-new-project').onclick = async () => {
+            const name = prompt("Project Name:");
+            if(!name) return;
+            const slug = prompt("Subdomain Slug (e.g. my-app):", name.toLowerCase().replace(/[^a-z0-9-]/g, ''));
+            if(!slug) return;
+            try {
+                await apiCall('/projects', 'POST', { name, slug });
+                loadDashboard();
+            } catch (e) {
+                alert("Error: " + (e.error || e.message));
+            }
+        };
+
+        document.getElementById('btn-new-apikey').onclick = async () => {
+            await apiCall('/apikeys', 'POST');
+            loadDashboard();
+        };
+
+        window.deleteApiKey = async (key) => {
+            if(!confirm("Revoke this key?")) return;
+            await apiCall('/apikeys', 'DELETE', { key });
+            loadDashboard();
+        };
+
+        // IDE
+        window.openProject = async (id) => {
+            currentProject = projects.find(p => p.id === id);
+            document.getElementById('ide-project-name').textContent = currentProject.name;
+            document.getElementById('ide-project-link').href = `https://${currentProject.slug}.arix-app.vercel.com`;
+            
+            // Load files
+            files = await apiCall(`/projects/${id}/files`);
+            if (Object.keys(files).length === 0) {
+                files['/index.html'] = '<h1>Hello</h1>';
+            }
+            renderFileTree();
+            
+            // Open first file
+            const first = Object.keys(files).sort()[0];
+            if (first) openFile(first);
+            
+            showScreen('ide');
+        };
+
+        document.getElementById('btn-back-dashboard').onclick = () => {
+            currentProject = null;
+            showScreen('dashboard');
+            loadDashboard();
+        };
 
         function renderFileTree() {
-            const treeEl = document.getElementById('file-tree');
-            treeEl.innerHTML = '';
-            for (const path in files) {
-                const fileEl = document.createElement('div');
-                fileEl.className = 'flex items-center space-x-2 p-1 hover:bg-gray-700 cursor-pointer rounded text-sm text-gray-300';
-                fileEl.innerHTML = `<i class="fas fa-file-code text-blue-400"></i><span>${path}</span>`;
-                fileEl.onclick = () => openFile(path);
-                treeEl.appendChild(fileEl);
-            }
+            const tree = document.getElementById('file-tree');
+            tree.innerHTML = Object.keys(files).sort().map(path => `
+                <div class="file-item flex justify-between items-center p-1.5 rounded ${path === currentFilePath ? 'active' : ''}" onclick="openFile('${path}')">
+                    <span class="truncate">${path}</span>
+                    <button class="text-red-500 hover:text-red-400 text-xs hidden-until-hover px-1" onclick="deleteFile('${path}', event)">&times;</button>
+                </div>
+            `).join('');
         }
 
-        function openFile(path) {
-            currentFile = path;
-            const file = files[path];
-            if (editor) {
-                editor.setValue(file.content || '');
-                // Simple language detection
-                let lang = 'javascript';
-                if (path.endsWith('.html')) lang = 'html';
-                else if (path.endsWith('.css')) lang = 'css';
-                else if (path.endsWith('.json')) lang = 'json';
-                monaco.editor.setModelLanguage(editor.getModel(), lang);
-            }
-        }
+        window.openFile = (path) => {
+            currentFilePath = path;
+            const ext = path.split('.').pop().toLowerCase();
+            let lang = 'javascript';
+            if (ext === 'html') lang = 'html';
+            else if (ext === 'css') lang = 'css';
+            else if (ext === 'json') lang = 'json';
+            
+            monaco.editor.setModelLanguage(editor.getModel(), lang);
+            editor.setValue(files[path] || '');
+            renderFileTree();
+        };
 
-        document.getElementById('new-file-btn').addEventListener('click', async () => {
-            const name = prompt("Enter file name (e.g., api/hello.js):");
-            if (name && !files[name]) {
-                // Prevent basic path traversal in UI (server must also check)
-                if (name.includes('..')) return alert("Invalid path");
-                files[name] = { content: '// new file' };
-                renderFileTree();
-                openFile(name);
-                // Save immediately
-                await fetch('/api/backend', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'saveFile', projectId, path: name, content: '// new file' })
-                });
+        document.getElementById('btn-new-file').onclick = () => {
+            let path = prompt("File path (e.g. /api/users.js or /index.html):", "/");
+            if(!path) return;
+            if(!path.startsWith('/')) path = '/' + path;
+            if(!files[path]) {
+                files[path] = '';
+                openFile(path);
             }
-        });
+        };
 
-        // API Key Management
-        async function loadApiKey() {
+        window.deleteFile = (path, e) => {
+            e.stopPropagation();
+            if(!confirm(`Delete ${path}?`)) return;
+            delete files[path];
+            if(currentFilePath === path) {
+                editor.setValue('// File deleted');
+                currentFilePath = null;
+            }
+            renderFileTree();
+        };
+
+        // Deploy
+        document.getElementById('btn-deploy').onclick = async () => {
+            const btn = document.getElementById('btn-deploy');
+            const og = btn.textContent;
+            btn.textContent = "Deploying...";
+            btn.disabled = true;
+            
             try {
-                const res = await fetch('/api/backend?action=getApiKey');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.apiKey) {
-                        document.getElementById('api-key-display').innerText = data.apiKey;
+                // Get existing on server to sync deletions
+                const remoteFiles = await apiCall(`/projects/${currentProject.id}/files`);
+                
+                // Delete removed files
+                for(let rp of Object.keys(remoteFiles)) {
+                    if(files[rp] === undefined) {
+                        await apiCall(`/projects/${currentProject.id}/files`, 'DELETE', { path: rp });
                     }
                 }
-            } catch (e) { console.error(e); }
-        }
-
-        document.getElementById('generate-api-key-btn').addEventListener('click', async () => {
-            if(!confirm("Generate a new API key? The old one will be invalidated.")) return;
-            try {
-                const res = await fetch('/api/backend?action=generateApiKey', { method: 'POST' });
-                const data = await res.json();
-                if (data.apiKey) {
-                    document.getElementById('api-key-display').innerText = data.apiKey;
-                }
-            } catch (e) { alert("Failed to generate API key"); }
-        });
-
-        document.getElementById('copy-api-key-btn').addEventListener('click', () => {
-            const key = document.getElementById('api-key-display').innerText;
-            if(key && key !== '************************') {
-                navigator.clipboard.writeText(key);
-                alert("API Key copied!");
-            }
-        });
-
-        // Deployment
-        document.getElementById('deploy-btn').addEventListener('click', async () => {
-            const statusDiv = document.getElementById('deploy-status');
-            const statusText = document.getElementById('deploy-status-text');
-            const linkEl = document.getElementById('deploy-link');
-            
-            statusDiv.classList.remove('hidden');
-            linkEl.classList.add('hidden');
-            statusText.innerText = 'Saving & Deploying...';
-            statusText.className = 'text-yellow-400';
-
-            try {
-                // First save all current files
-                for (const path in files) {
-                   await fetch('/api/backend', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'saveFile', projectId, path, content: files[path].content })
+                
+                // Upload current files
+                for(let path of Object.keys(files)) {
+                    await apiCall(`/projects/${currentProject.id}/files`, 'POST', {
+                        path: path,
+                        content: files[path]
                     });
                 }
-
-                // Then trigger deploy
-                const res = await fetch('/api/backend', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'deploy', projectId })
-                });
                 
-                const data = await res.json();
-                if (res.ok && data.url) {
-                    statusText.innerText = 'Deployed Successfully';
-                    statusText.className = 'text-green-400';
-                    linkEl.href = data.url;
-                    linkEl.innerText = data.url;
-                    linkEl.classList.remove('hidden');
-                } else {
-                    throw new Error(data.error || 'Deployment failed');
-                }
+                btn.textContent = "Saved & Deployed!";
+                setTimeout(() => btn.textContent = og, 2000);
             } catch (e) {
-                statusText.innerText = 'Failed: ' + e.message;
-                statusText.className = 'text-red-400';
+                alert("Deploy failed: " + e.message);
+                btn.textContent = og;
             }
-        });
+            btn.disabled = false;
+        };
 
-        // Initial Load
-        checkSession();
-        
-        console.log("Arix-APP initialized");
+        // Env Vars
+        const envModal = document.getElementById('env-modal');
+        document.getElementById('btn-env-vars').onclick = async () => {
+            envModal.classList.remove('hidden');
+            await loadEnvVars();
+        };
+        document.getElementById('btn-close-env').onclick = () => envModal.classList.add('hidden');
+
+        async function loadEnvVars() {
+            const envs = await apiCall(`/projects/${currentProject.id}/env`);
+            const list = document.getElementById('env-list');
+            list.innerHTML = Object.keys(envs).map(k => `
+                <div class="flex justify-between items-center py-2 border-b border-gray-800">
+                    <span class="font-mono text-sm">${k}</span>
+                    <button class="text-red-500 text-sm hover:underline" onclick="deleteEnv('${k}')">Remove</button>
+                </div>
+            `).join('');
+            if(Object.keys(envs).length === 0) list.innerHTML = '<span class="text-gray-500">No environment variables set.</span>';
+        }
+
+        document.getElementById('btn-add-env').onclick = async () => {
+            const k = document.getElementById('env-key').value;
+            const v = document.getElementById('env-val').value;
+            if(!k) return;
+            await apiCall(`/projects/${currentProject.id}/env`, 'POST', { key: k, value: v });
+            document.getElementById('env-key').value = '';
+            document.getElementById('env-val').value = '';
+            loadEnvVars();
+        };
+
+        window.deleteEnv = async (key) => {
+            await apiCall(`/projects/${currentProject.id}/env`, 'DELETE', { key });
+            loadEnvVars();
+        };
+
     </script>
 </body>
 </html>
