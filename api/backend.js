@@ -239,18 +239,31 @@ export default async function (req, res) {
                 // Strip leading slash if present in runFiles keys
                 let searchPath = route.startsWith('/') ? route.substring(1) : route;
                 
-                const staticFile = runFiles[searchPath] || runFiles['public/' + searchPath];
+                // Fallback sequence: Exact -> Public folder -> Any HTML file -> First available file
+                let staticFile = runFiles[searchPath] || runFiles['public/' + searchPath];
+                
+                if (!staticFile && route === 'index.html') {
+                    const fallbackKey = Object.keys(runFiles).find(k => k.endsWith('.html')) || Object.keys(runFiles)[0];
+                    if (fallbackKey) staticFile = runFiles[fallbackKey];
+                }
                 
                 if (staticFile) {
-                    if (searchPath.endsWith('.html')) res.setHeader('Content-Type', 'text/html');
-                    else if (searchPath.endsWith('.css')) res.setHeader('Content-Type', 'text/css');
-                    else if (searchPath.endsWith('.js')) res.setHeader('Content-Type', 'application/javascript');
-                    else if (searchPath.endsWith('.json')) res.setHeader('Content-Type', 'application/json');
+                    // Default to HTML so pasted code renders as a webpage instead of raw text
+                    let contentType = 'text/html; charset=utf-8'; 
                     
-                    return res.status(200).send(staticFile.content);
+                    if (searchPath.endsWith('.css')) contentType = 'text/css; charset=utf-8';
+                    else if (searchPath.endsWith('.js')) contentType = 'application/javascript; charset=utf-8';
+                    else if (searchPath.endsWith('.json')) contentType = 'application/json; charset=utf-8';
+                    
+                    res.setHeader('Content-Type', contentType);
+                    
+                    // Use .end() to bypass framework serialization that might convert strings to plain text
+                    res.status(200);
+                    return res.end(staticFile.content);
                 }
 
-                return res.status(404).send('Not found');
+                res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                return res.status(404).end('<h2>404 - File Not Found</h2><p>Please create an <b>index.html</b> file in your project.</p>');
 
             case 'health':
                 return res.status(200).json({ status: 'ok' });
